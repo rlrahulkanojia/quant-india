@@ -9,6 +9,7 @@ to Claude for pattern analysis, and persists the resulting
 from __future__ import annotations
 
 import json
+import os
 import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -39,10 +40,10 @@ class ReflectionService:
     def __init__(
         self,
         store: DecisionStore,
-        model: str = "claude-sonnet-4-20250514",
+        model: str | None = None,
     ) -> None:
         self._store = store
-        self._model = model
+        self._model = model or os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
     # ------------------------------------------------------------------
     # Public API

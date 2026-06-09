@@ -10,6 +10,7 @@ thresholds, model selection).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 
@@ -75,4 +76,4 @@ class DebateConfig:
     confidence_skip_below: int = 60
     confidence_log_below: int = 80
     confidence_trade_above: int = 80
-    model: str = "claude-sonnet-4-20250514"
+    model: str = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")

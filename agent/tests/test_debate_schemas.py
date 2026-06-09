@@ -233,7 +233,10 @@ class TestDebateConfig:
         assert cfg.confidence_skip_below == 60
         assert cfg.confidence_log_below == 80
         assert cfg.confidence_trade_above == 80
-        assert cfg.model == "claude-sonnet-4-20250514"
+        # Model defaults to ANTHROPIC_MODEL env var, or claude-sonnet-4-20250514
+        import os
+        expected_model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+        assert cfg.model == expected_model
 
     def test_custom_overrides(self):
         cfg = DebateConfig(
