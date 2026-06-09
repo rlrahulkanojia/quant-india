@@ -20,10 +20,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
-from backtest.loaders.tushare_fundamentals import (
-    TushareFundamentalProvider,
-    enrich_price_frames_with_fundamentals,
-)
 from backtest.metrics import (
     by_exit_reason_stats,
     by_symbol_stats,
@@ -182,24 +178,19 @@ def _maybe_enrich_fundamentals(
     data_map: Dict[str, pd.DataFrame],
     config: Dict[str, Any],
 ) -> Dict[str, pd.DataFrame]:
-    """Attach configured Tushare statement fields before signal generation."""
-    fields_by_table = _normalise_fundamental_fields(config)
-    if not fields_by_table:
-        return data_map
+    """Placeholder — Tushare fundamental enrichment removed (India fork).
 
-    try:
-        provider = TushareFundamentalProvider()
-        return enrich_price_frames_with_fundamentals(
-            data_map,
-            provider,
-            fields_by_table,
-            as_of=config.get("end_date", ""),
-            periods=config.get("fundamental_periods"),
+    Returns *data_map* unchanged.  If ``fundamental_fields`` is configured,
+    logs a warning so the user knows the feature is inactive.
+    """
+    fields_by_table = _normalise_fundamental_fields(config)
+    if fields_by_table:
+        logger.warning(
+            "fundamental_fields configured but Tushare enrichment was removed "
+            "in the India fork — ignoring: %s",
+            list(fields_by_table),
         )
-    except Exception as exc:
-        raise RuntimeError(
-            f"fundamental_fields requested but Tushare enrichment failed: {exc}"
-        ) from exc
+    return data_map
 
 
 # ─── Base Engine ───

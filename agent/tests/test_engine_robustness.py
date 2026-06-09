@@ -21,7 +21,7 @@ import pytest
 
 from backtest.engines.base import _align
 from backtest.engines import base as base_engine
-from backtest.engines.china_a import ChinaAEngine
+from backtest.engines.global_equity import GlobalEquityEngine
 from backtest.loaders.base import validate_date_range
 from backtest.runner import BacktestConfigSchema
 
@@ -117,17 +117,17 @@ class TestSymbolIsolation:
 
         _, close_df, target_pos, _ = _align(data_map, signal_map, valid_codes)
 
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
 
         # Patch _rebalance to throw for BAD only
-        original_rebalance = ChinaAEngine._rebalance
+        original_rebalance = GlobalEquityEngine._rebalance
 
         def _exploding_rebalance(self, symbol, target_weight, df, ts, equity):
             if symbol == "BAD":
                 raise RuntimeError("Simulated failure for BAD")
             return original_rebalance(self, symbol, target_weight, df, ts, equity)
 
-        with patch.object(ChinaAEngine, "_rebalance", _exploding_rebalance):
+        with patch.object(GlobalEquityEngine, "_rebalance", _exploding_rebalance):
             # Should NOT raise — exception is caught internally
             engine._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
 
@@ -135,12 +135,11 @@ class TestSymbolIsolation:
         assert len(engine.trades) > 0
         assert all(t.symbol == "GOOD" for t in engine.trades)
 
-    def test_backtest_enriches_data_map_with_configured_fundamental_fields(
+    def test_backtest_ignores_fundamental_fields_after_tushare_removal(
         self,
-        monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """A-share backtests should expose configured statement fields to strategies."""
+        """fundamental_fields should be silently ignored (Tushare removed in India fork)."""
         dates = pd.bdate_range("2024-04-01", periods=3)
         bars = pd.DataFrame(
             {
@@ -160,27 +159,17 @@ class TestSymbolIsolation:
         class SignalEngine:
             def generate(self, data_map):
                 frame = data_map["000001.SZ"]
-                assert "income_total_revenue" in frame.columns
-                assert frame["income_total_revenue"].iloc[-1] == 120.0
+                # fundamental columns should NOT be present (enrichment removed)
+                assert "income_total_revenue" not in frame.columns
                 return {"000001.SZ": pd.Series(0.0, index=frame.index)}
 
-        def fake_enrich(data_map, provider, fields_by_table, *, as_of, periods=None):
-            assert fields_by_table == {"income": ["total_revenue"]}
-            assert as_of == "2024-04-30"
-            enriched = {code: frame.copy() for code, frame in data_map.items()}
-            enriched["000001.SZ"]["income_total_revenue"] = [None, 80.0, 120.0]
-            return enriched
-
-        monkeypatch.setattr(base_engine, "TushareFundamentalProvider", lambda: object(), raising=False)
-        monkeypatch.setattr(base_engine, "enrich_price_frames_with_fundamentals", fake_enrich, raising=False)
-
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         engine.run_backtest(
             {
                 "codes": ["000001.SZ"],
                 "start_date": "2024-04-01",
                 "end_date": "2024-04-30",
-                "source": "tushare",
+                "source": "yfinance",
                 "fundamental_fields": {"income": ["total_revenue"]},
                 "initial_cash": 1_000_000,
             },
@@ -224,7 +213,7 @@ class TestSymbolIsolation:
 
         monkeypatch.setattr("backtest.benchmark.resolve_benchmark", fake_resolve_benchmark)
 
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         metrics = engine.run_backtest(
             {
                 "codes": ["000001.SZ"],
@@ -251,28 +240,22 @@ class TestSymbolIsolation:
         assert run_card["metrics"]["benchmark_return"] == 0.00495
         assert (tmp_path / "run_card.md").exists()
 
-    def test_configured_fundamental_enrichment_failure_is_not_silent(
+    def test_fundamental_enrichment_returns_data_unchanged_after_tushare_removal(
         self,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Explicit statement-field requests should fail rather than degrade silently."""
+        """fundamental_fields are silently ignored (Tushare removed in India fork)."""
         dates = pd.bdate_range("2024-04-01", periods=1)
         bars = pd.DataFrame({"close": [10.0]}, index=dates)
 
-        def fake_enrich(*args, **kwargs):
-            raise RuntimeError("provider failed")
-
-        monkeypatch.setattr(base_engine, "TushareFundamentalProvider", lambda: object(), raising=False)
-        monkeypatch.setattr(base_engine, "enrich_price_frames_with_fundamentals", fake_enrich, raising=False)
-
-        with pytest.raises(RuntimeError, match="fundamental_fields.*provider failed"):
-            base_engine._maybe_enrich_fundamentals(
-                {"000001.SZ": bars},
-                {
-                    "end_date": "2024-04-30",
-                    "fundamental_fields": {"income": ["total_revenue"]},
-                },
-            )
+        result = base_engine._maybe_enrich_fundamentals(
+            {"000001.SZ": bars},
+            {
+                "end_date": "2024-04-30",
+                "fundamental_fields": {"income": ["total_revenue"]},
+            },
+        )
+        # Data should be returned unchanged (no enrichment)
+        pd.testing.assert_frame_equal(result["000001.SZ"], bars)
 
 
 # ---------------------------------------------------------------------------
@@ -404,41 +387,6 @@ class TestDateRangeValidation:
         with pytest.raises(ValueError):
             loader.fetch(["AAPL"], "2025-06-01", "2025-01-01")
 
-    def test_okx_loader_validates_dates(self) -> None:
-        """OKX loader should raise on reversed dates before fetching."""
-        from backtest.loaders.okx import DataLoader
-
-        loader = DataLoader()
-        with pytest.raises(ValueError):
-            loader.fetch(["BTC-USDT"], "2025-06-01", "2025-01-01")
-
-    def test_ccxt_loader_validates_dates(self) -> None:
-        """CCXT loader should raise on reversed dates before fetching."""
-        from backtest.loaders.ccxt_loader import DataLoader
-
-        loader = DataLoader()
-        with pytest.raises(ValueError):
-            loader.fetch(["BTC-USDT"], "2025-06-01", "2025-01-01")
-
-    def test_akshare_loader_validates_dates(self) -> None:
-        """AKShare loader should raise on reversed dates before fetching."""
-        from backtest.loaders.akshare_loader import DataLoader
-
-        loader = DataLoader()
-        with pytest.raises(ValueError):
-            loader.fetch(["000001.SZ"], "2025-06-01", "2025-01-01")
-
-    def test_tushare_loader_validates_dates(self) -> None:
-        """Tushare loader should raise on reversed dates before fetching."""
-        from backtest.loaders.tushare import DataLoader
-
-        # Tushare requires TUSHARE_TOKEN at init; skip if unavailable
-        import os
-        if not os.getenv("TUSHARE_TOKEN"):
-            pytest.skip("TUSHARE_TOKEN not set")
-        loader = DataLoader()
-        with pytest.raises(ValueError):
-            loader.fetch(["000001.SZ"], "2025-06-01", "2025-01-01")
 
 
 # ---------------------------------------------------------------------------
@@ -488,6 +436,6 @@ class TestFullBacktestRobustness:
         )
 
         # Engine should still complete without crashing
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         engine._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
         assert len(engine.equity_snapshots) == 20

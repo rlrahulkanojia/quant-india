@@ -47,7 +47,7 @@ def test_strategy_hash_is_included_when_strategy_path_exists(tmp_path: Path) -> 
 
     card = write_run_card(
         tmp_path / "run",
-        {"codes": ["BTC-USDT"], "engine": "crypto"},
+        {"codes": ["AAPL.US"], "engine": "global_equity"},
         {"return_pct": 0.15},
         strategy_path=strategy_path,
     )
@@ -158,60 +158,5 @@ def test_runner_artifact_spec_surfaces_run_card_paths() -> None:
     assert runner.artifact_entries["run_card_md"]["required"] is False
 
 
-def test_options_backtest_writes_run_card(tmp_path: Path) -> None:
-    from backtest.engines.options_portfolio import run_options_backtest
 
-    dates = pd.bdate_range("2025-01-01", periods=4)
-    bars = pd.DataFrame(
-        {
-            "open": [100.0, 101.0, 102.0, 103.0],
-            "high": [101.0, 102.0, 103.0, 104.0],
-            "low": [99.0, 100.0, 101.0, 102.0],
-            "close": [100.5, 101.5, 102.5, 103.5],
-            "volume": [1000, 1100, 1200, 1300],
-        },
-        index=dates,
-    )
-
-    class FakeLoader:
-        name = "yfinance"
-
-        def fetch(self, codes, start_date, end_date):
-            return {"SPY": bars.copy()}
-
-    class SignalEngine:
-        def generate(self, data_map):
-            return [
-                {
-                    "date": "2025-01-01",
-                    "action": "open",
-                    "underlying": "SPY",
-                    "legs": [{"type": "call", "strike": 101.0, "expiry": "2025-03-21", "qty": 1}],
-                },
-                {
-                    "date": "2025-01-03",
-                    "action": "close",
-                    "underlying": "SPY",
-                    "legs": [{"type": "call", "strike": 101.0, "expiry": "2025-03-21", "qty": 1}],
-                },
-            ]
-
-    run_options_backtest(
-        {
-            "codes": ["SPY"],
-            "start_date": "2025-01-01",
-            "end_date": "2025-01-06",
-            "source": "yfinance",
-            "engine": "options",
-            "initial_cash": 100_000,
-        },
-        FakeLoader(),
-        SignalEngine(),
-        tmp_path,
-    )
-
-    card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
-    assert card["backtest"]["engine"] == "options"
-    assert card["data_sources"] == ["yfinance"]
-    assert "greeks.csv" in {Path(artifact["path"]).name for artifact in card["artifacts"]}
-    assert (tmp_path / "run_card.md").exists()
+# Options backtest engine removed in India equity fork (Task 5).

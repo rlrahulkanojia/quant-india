@@ -1,6 +1,6 @@
 """Tests for BaseEngine shared logic: _align, _close_position, _calc_equity.
 
-Uses ChinaAEngine as a concrete implementation since BaseEngine is abstract.
+Uses GlobalEquityEngine as a concrete implementation since BaseEngine is abstract.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from backtest.engines.base import BaseEngine, _align, _load_optimizer
-from backtest.engines.china_a import ChinaAEngine
+from backtest.engines.global_equity import GlobalEquityEngine
 from backtest.models import Position
 
 
@@ -135,7 +135,7 @@ class TestLoadOptimizer:
 
 class TestClosePosition:
     def test_profitable_long(self) -> None:
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         engine._bar_idx = 5
         engine.positions["000001.SZ"] = Position(
             "000001.SZ", 1, 15.0, pd.Timestamp("2025-01-02"), 1000.0, entry_bar_idx=0,
@@ -151,7 +151,7 @@ class TestClosePosition:
         assert t.holding_bars == 5
 
     def test_losing_long(self) -> None:
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         engine._bar_idx = 3
         engine.positions["600519.SH"] = Position(
             "600519.SH", 1, 1800.0, pd.Timestamp("2025-01-02"), 100.0, entry_bar_idx=0,
@@ -164,12 +164,12 @@ class TestClosePosition:
         assert t.direction == 1
 
     def test_close_nonexistent_position_noop(self) -> None:
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         engine._close_position("NOPE.SZ", 10.0, pd.Timestamp("2025-01-01"), "signal")
         assert len(engine.trades) == 0
 
     def test_capital_returned(self) -> None:
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         engine._bar_idx = 1
         engine.positions["000001.SZ"] = Position(
             "000001.SZ", 1, 15.0, pd.Timestamp("2025-01-02"), 1000.0,
@@ -188,14 +188,14 @@ class TestClosePosition:
 
 class TestCalcEquity:
     def test_no_positions(self) -> None:
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         dates = pd.DatetimeIndex([pd.Timestamp("2025-01-02")])
         close_df = pd.DataFrame({"X": [15.0]}, index=dates)
         eq = engine._calc_equity(close_df, dates[0])
         assert eq == 1_000_000.0
 
     def test_with_unrealized_gain(self) -> None:
-        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        engine = GlobalEquityEngine({"initial_cash": 1_000_000})
         engine.capital = 985_000.0
         engine.positions["X"] = Position("X", 1, 15.0, pd.Timestamp("2025-01-02"), 1000.0)
         dates = pd.DatetimeIndex([pd.Timestamp("2025-01-03")])

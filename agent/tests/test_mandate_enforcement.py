@@ -34,12 +34,51 @@ from src.live.mandate.model import (
     Mandate,
     UniverseConstraint,
 )
+from src.live.extractors import BROKER_EXTRACTORS
 from src.tools.mcp import MCPRemoteToolSpec
+
+
+def _test_extract_order_intent(tool_name: str, kwargs: dict) -> "OrderIntent | None":
+    """Test-only order-intent extractor (replaces removed Robinhood extractor)."""
+    if tool_name != "place_order":
+        return None
+    symbol = kwargs.get("symbol") or kwargs.get("ticker")
+    side = kwargs.get("side") or kwargs.get("action")
+    if not symbol or not side:
+        return None
+    side = str(side).strip().lower()
+    if side not in ("buy", "sell"):
+        return None
+    instr_raw = str(kwargs.get("instrument_type", "equity")).strip().lower()
+    instr_map = {"equity": InstrumentType.EQUITY, "stock": InstrumentType.EQUITY, "etf": InstrumentType.ETF}
+    instr = instr_map.get(instr_raw)
+    if instr is None:
+        return None
+    notional = kwargs.get("notional_usd") or kwargs.get("dollar_amount")
+    quantity = kwargs.get("quantity")
+    if notional is None and quantity is None:
+        return None
+    return OrderIntent(
+        symbol=str(symbol).strip().upper(),
+        side=side,
+        notional_usd=float(notional) if notional is not None else None,
+        quantity=float(quantity) if quantity is not None else None,
+        instrument_type=instr,
+        asset_class=AssetClass.US_EQUITY,
+    )
 
 
 # --------------------------------------------------------------------------- #
 # Fixtures + mock MCP adapter                                                  #
 # --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(autouse=True)
+def _register_test_extractor():
+    """Register a test extractor for 'robinhood' broker used in these tests."""
+    BROKER_EXTRACTORS["robinhood"] = _test_extract_order_intent
+    yield
+    BROKER_EXTRACTORS.pop("robinhood", None)
 
 
 @pytest.fixture

@@ -23,9 +23,6 @@ from fastmcp.client.transports.stdio import StdioTransport
 from pydantic import ValidationError
 
 from src.config.schema import (
-    IBKR_MCP_SERVER_SEED,
-    LIVE_BROKER_SERVER_KEYS,
-    ROBINHOOD_MCP_SERVER_SEED,
     AgentConfig,
     MCPOAuthConfig,
     MCPServerConfig,
@@ -92,27 +89,6 @@ def test_override_carries_auth() -> None:
     assert isinstance(override.auth, MCPOAuthConfig)
 
 
-def test_robinhood_seed_is_readonly_and_oauth() -> None:
-    cfg = AgentConfig.model_validate({"mcpServers": {"robinhood": ROBINHOOD_MCP_SERVER_SEED}})
-    rh = cfg.mcp_servers["robinhood"]
-    assert rh.resolved_transport() == "streamableHttp"
-    assert rh.auth is not None and rh.auth.type == "oauth"
-    assert "*" not in rh.enabled_tools
-    assert rh.enabled_tools  # non-empty explicit allowlist
-    assert "robinhood" in LIVE_BROKER_SERVER_KEYS
-
-
-def test_ibkr_seed_is_official_readonly_oauth_probe() -> None:
-    cfg = AgentConfig.model_validate({"mcpServers": {"ibkr": IBKR_MCP_SERVER_SEED}})
-    ibkr = cfg.mcp_servers["ibkr"]
-    assert ibkr.resolved_transport() == "streamableHttp"
-    assert ibkr.url == "https://api.ibkr.com/v1/api/mcp"
-    assert ibkr.auth is not None and ibkr.auth.type == "oauth"
-    assert ibkr.auth.scopes == ["mcp.read"]
-    assert ibkr.auth.cache_dir == "~/.vibe-trading/live/ibkr/oauth"
-    assert ibkr.enabled_tools == ["*"]
-    assert "ibkr" in LIVE_BROKER_SERVER_KEYS
-
 
 # --------------------------------------------------------------------------- #
 # Validator rejections
@@ -139,54 +115,6 @@ def test_auth_and_static_headers_are_mutually_exclusive() -> None:
 def test_stdio_rejects_auth() -> None:
     with pytest.raises(ValidationError, match="HTTP-only"):
         MCPServerConfig.model_validate({"command": "uvx", "args": ["demo"], "auth": {"type": "oauth"}})
-
-
-def test_live_broker_rejects_wildcard_allowlist() -> None:
-    with pytest.raises(ValidationError, match="wildcard"):
-        AgentConfig.model_validate(
-            {
-                "mcpServers": {
-                    "robinhood": {
-                        "type": "streamableHttp",
-                        "url": "https://agent.robinhood.com/mcp/trading",
-                        "auth": {"type": "oauth"},
-                        "enabledTools": ["*"],
-                    }
-                }
-            }
-        )
-
-
-def test_ibkr_rejects_wildcard_when_write_scope_is_requested() -> None:
-    with pytest.raises(ValidationError, match="wildcard"):
-        AgentConfig.model_validate(
-            {
-                "mcpServers": {
-                    "ibkr": {
-                        "type": "streamableHttp",
-                        "url": "https://api.ibkr.com/v1/api/mcp",
-                        "auth": {"type": "oauth", "scopes": ["mcp.read", "mcp.write"]},
-                        "enabledTools": ["*"],
-                    }
-                }
-            }
-        )
-
-
-def test_ibkr_rejects_wildcard_without_read_scope() -> None:
-    with pytest.raises(ValidationError, match="wildcard"):
-        AgentConfig.model_validate(
-            {
-                "mcpServers": {
-                    "ibkr": {
-                        "type": "streamableHttp",
-                        "url": "https://api.ibkr.com/v1/api/mcp",
-                        "auth": {"type": "oauth", "scopes": ["openid"]},
-                        "enabledTools": ["*"],
-                    }
-                }
-            }
-        )
 
 
 def test_non_live_broker_still_allows_wildcard() -> None:

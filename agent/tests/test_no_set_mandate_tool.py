@@ -70,7 +70,6 @@ def test_agent_reachable_modules_never_open_mandate_for_write() -> None:
         LIVE_DIR / "order_guard.py",
         LIVE_DIR / "enforcement.py",
         LIVE_DIR / "extractors" / "__init__.py",
-        TRADING_DIR / "connectors" / "robinhood" / "extractor.py",
         LIVE_DIR / "mandate" / "store.py",
     ]
     write_modes = {"w", "wb", "a", "ab", "w+", "r+", "x"}

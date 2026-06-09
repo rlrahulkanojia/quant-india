@@ -199,30 +199,22 @@ class TestConnectorHaltResume:
         from src.trading import profiles
 
         monkeypatch.setattr(profiles, "get_runtime_root", lambda: live_root)
-        profiles.save_selected_profile_id("robinhood-live-mcp")
+        profiles.save_selected_profile_id("dhan-live-sdk-readonly")
 
-        assert cmd_connector_halt(None) == 0
-        assert (live_root / "live" / "robinhood" / "HALT").exists()
-        assert not (live_root / "live" / "HALT").exists()
-        assert halt_flag_set("robinhood") is True
-
-        out = capsys.readouterr().out
-        assert "vibe-trading connector resume" in out
-        assert "vibe-trading live" not in out
+        # dhan-live-sdk-readonly is broker_sdk, not remote_mcp — halt rejects it
+        assert cmd_connector_halt(None) != 0
 
     def test_resume_without_profile_uses_selected_connector(
         self, live_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from cli._legacy import cmd_connector_halt, cmd_connector_resume
-        from src.live.halt import halt_flag_set
         from src.trading import profiles
 
         monkeypatch.setattr(profiles, "get_runtime_root", lambda: live_root)
-        profiles.save_selected_profile_id("robinhood-live-mcp")
+        profiles.save_selected_profile_id("dhan-live-sdk-readonly")
 
-        cmd_connector_halt(None)
-        assert cmd_connector_resume(None) == 0
-        assert halt_flag_set("robinhood") is False
+        # dhan-live-sdk-readonly is broker_sdk, not remote_mcp — resume rejects it
+        assert cmd_connector_resume(None) != 0
 
     def test_halt_with_explicit_non_live_profile_fails(self, live_root: Path) -> None:
         from cli._legacy import EXIT_USAGE_ERROR, cmd_connector_halt

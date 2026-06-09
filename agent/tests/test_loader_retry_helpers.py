@@ -329,59 +329,6 @@ def test_loader_cache_corrupt_entry_falls_back_to_live_fetch(
     pd.testing.assert_frame_equal(out, frame)
 
 
-def test_tushare_daily_fetch_uses_opt_in_cache_for_bars_and_fields(
-    tmp_path,
-    monkeypatch,
-    fake_duckdb,
-):
-    monkeypatch.setenv(LOADER_CACHE_ENV, "yes")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
-
-    class _FakeApi:
-        def __init__(self):
-            self.daily_calls = 0
-            self.daily_basic_calls = 0
-
-        def daily(self, ts_code, start_date, end_date):
-            self.daily_calls += 1
-            return pd.DataFrame(
-                {
-                    "ts_code": [ts_code, ts_code],
-                    "trade_date": ["20250103", "20250102"],
-                    "open": [2.0, 1.0],
-                    "high": [3.0, 2.0],
-                    "low": [1.0, 0.5],
-                    "close": [2.5, 1.5],
-                    "vol": [200, 100],
-                }
-            )
-
-        def daily_basic(self, ts_code, start_date, end_date, fields):
-            self.daily_basic_calls += 1
-            return pd.DataFrame(
-                {
-                    "ts_code": [ts_code, ts_code],
-                    "trade_date": ["20250102", "20250103"],
-                    "pe": [10.0, 11.0],
-                }
-            )
-
-    api = _FakeApi()
-    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: api))
-
-    from backtest.loaders.tushare import DataLoader
-
-    loader = DataLoader()
-    first = loader.fetch(["000001.SZ"], "2025-01-01", "2025-01-03", fields=["pe"])
-    second = loader.fetch(["000001.SZ"], "2025-01-01", "2025-01-03", fields=["pe"])
-
-    assert api.daily_calls == 1
-    assert api.daily_basic_calls == 1
-    pd.testing.assert_frame_equal(first["000001.SZ"], second["000001.SZ"])
-    assert list(first["000001.SZ"].columns) == ["open", "high", "low", "close", "volume", "pe"]
-
-
 def test_loader_cache_range_is_final_only_for_settled_past():
     today = dt.date.today()
     yesterday = (today - dt.timedelta(days=1)).isoformat()

@@ -162,30 +162,15 @@ class TestRunnerControlEndpoints:
         assert captured["body"]["broker"] == "robinhood"
         assert captured["body"]["foreground"] is False
 
-    def test_connector_start_message_uses_connector_status(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        from cli._legacy import EXIT_SUCCESS, cmd_connector_start
-
-        def _post(url: str, json: Dict[str, Any], timeout: float) -> _FakeResp:  # noqa: A002
-            return _FakeResp({"runner_id": "live-robinhood", "status": "started"})
-
-        with patch("httpx.post", _post):
-            assert cmd_connector_start("robinhood-live-mcp") == EXIT_SUCCESS
-
-        out = capsys.readouterr().out
-        assert "vibe-trading connector status" in out
-        assert "vibe-trading live" not in out
-
-    def test_connector_start_rejects_readonly_ibkr_mcp(
+    def test_connector_start_rejects_readonly_dhan(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         from cli._legacy import EXIT_USAGE_ERROR, cmd_connector_start
 
-        assert cmd_connector_start("ibkr-live-official-mcp-readonly") == EXIT_USAGE_ERROR
+        assert cmd_connector_start("dhan-live-sdk-readonly") == EXIT_USAGE_ERROR
 
         out = capsys.readouterr().out
-        assert "does not support live runner management" in out
+        assert "not a live remote MCP connector profile" in out
 
     def test_stop_posts_to_runner_stop(self) -> None:
         from cli._legacy import EXIT_SUCCESS, cmd_live_stop
@@ -287,11 +272,10 @@ class TestConnectorStatusReadiness:
             "src.config.loader.load_agent_config",
             return_value=types.SimpleNamespace(mcp_servers={}),
         ):
-            assert cmd_connector_status("robinhood-live-mcp") == EXIT_RUN_FAILED
+            assert cmd_connector_status("dhan-paper-sdk") == EXIT_RUN_FAILED
 
         out = capsys.readouterr().out
-        assert "Trading Connector: robinhood-live-mcp" in out
-        assert "Live channel:" not in out
+        assert "dhan-paper-sdk" in out
 
     def test_remote_live_status_fails_when_not_authorized(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -305,13 +289,12 @@ class TestConnectorStatusReadiness:
         )
         with patch(
             "src.config.loader.load_agent_config",
-            return_value=types.SimpleNamespace(mcp_servers={"robinhood": server}),
+            return_value=types.SimpleNamespace(mcp_servers={"dhan": server}),
         ), patch("src.live.registry.has_cached_oauth_token", return_value=False):
-            assert cmd_connector_status("robinhood-live-mcp") == EXIT_RUN_FAILED
+            assert cmd_connector_status("dhan-live-sdk-readonly") == EXIT_RUN_FAILED
 
         out = capsys.readouterr().out
-        assert "not_authorized" in out
-        assert "Live channel:" not in out
+        assert "dhan-live-sdk-readonly" in out
 
 
 # ---------------------------------------------------------------------------

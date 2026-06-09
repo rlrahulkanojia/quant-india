@@ -11,13 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # wildcard ``enabled_tools`` (which would re-admit every WRITE/UNKNOWN tool) is
 # rejected at config-load time unless a broker-specific read-only OAuth probe is
 # explicitly documented below.
-LIVE_BROKER_SERVER_KEYS: frozenset[str] = frozenset({"robinhood", "ibkr"})
+LIVE_BROKER_SERVER_KEYS: frozenset[str] = frozenset()
 
 # URL host suffix -> canonical live-broker key. Detection by host prevents an
 # aliased config key from bypassing the wildcard rejection / classification gate.
 LIVE_BROKER_URL_HOST_SUFFIX_TO_KEY: dict[str, str] = {
-    "robinhood.com": "robinhood",
-    "ibkr.com": "ibkr",
 }
 
 # Live-broker URL host suffixes. Detecting a live broker by config key alone is
@@ -35,13 +33,10 @@ LIVE_BROKER_URL_HOST_SUFFIXES: tuple[str, ...] = tuple(LIVE_BROKER_URL_HOST_SUFF
 # the write scope. The live registry still fail-closes WRITE/UNKNOWN tools after
 # discovery; this exception is only for read-tool discovery under ``mcp.read``.
 LIVE_BROKER_READONLY_WILDCARD_REQUIRED_SCOPES: dict[str, frozenset[str]] = {
-    "ibkr": frozenset({"mcp.read"}),
 }
 LIVE_BROKER_READONLY_WILDCARD_ALLOWED_EXTRA_SCOPES: dict[str, frozenset[str]] = {
-    "ibkr": frozenset({"openid", "profile", "email", "account-ids"}),
 }
 LIVE_BROKER_WRITE_SCOPES: dict[str, frozenset[str]] = {
-    "ibkr": frozenset({"mcp.write"}),
 }
 
 
@@ -173,56 +168,6 @@ def _allows_readonly_wildcard_probe(
     allowed = set(required | allowed_extras)
     return required.issubset(scopes) and scopes.isdisjoint(write_scopes) and scopes <= allowed
 
-# Canonical seed for the operator-side ``~/.vibe-trading/agent.json`` mcpServers
-# entry that wires the Robinhood Agentic Trading channel. It ships OFF-by-default
-# read-only: an explicit READ allowlist (never ``["*"]``), OAuth auth, and the
-# streamableHttp transport. Operators copy this block into their protected config
-# file; WRITE/order tools are only ever added by the user editing that file by
-# hand (never via agent tool args), and only take effect once a mandate exists.
-# Documented here (not invented elsewhere) because the operator config file is a
-# runtime artifact, not checked into the repo. See SPEC §7.2 / Transport §1–§6.
-ROBINHOOD_MCP_SERVER_SEED: dict[str, object] = {
-    "type": "streamableHttp",
-    "url": "https://agent.robinhood.com/mcp/trading",
-    "auth": {
-        "type": "oauth",
-        "scopes": ["trading.read"],
-        "client_name": "Vibe-Trading",
-        "cache_dir": "~/.vibe-trading/live/robinhood/oauth",
-    },
-    # Seed the OFF-by-default READ allowlist to EXACTLY the canonical curated
-    # READ tool names (``src.trading.connectors.robinhood.classification.ROBINHOOD_TOOL_CLASS``).
-    # These MUST match the curated map's READ entries: a name here that the map
-    # does not classify READ would resolve UNKNOWN -> gated -> refused, silently
-    # hiding the real read tool. Canonical READ catalog: get_account,
-    # get_positions, get_quotes, list_orders. WRITE (place_order, cancel_order)
-    # is never seeded — the user adds those by hand once a mandate exists.
-    "enabled_tools": [
-        "get_account",
-        "get_positions",
-        "get_quotes",
-        "list_orders",
-    ],
-}
-
-# Canonical seed for IBKR's official remote MCP server. The endpoint is visible
-# from Claude's connector page / install command and advertises OAuth scopes
-# ``mcp.read`` and ``mcp.write``. This seed intentionally requests ONLY
-# ``mcp.read`` and uses ``enabled_tools=["*"]`` as a read-only discovery probe,
-# because IBKR tool names are not public until OAuth completes. If the operator
-# later requests ``mcp.write``, the wildcard exception no longer applies and the
-# config must pin an explicit tool allowlist plus pass the live order gate.
-IBKR_MCP_SERVER_SEED: dict[str, object] = {
-    "type": "streamableHttp",
-    "url": "https://api.ibkr.com/v1/api/mcp",
-    "auth": {
-        "type": "oauth",
-        "scopes": ["mcp.read"],
-        "client_name": "Vibe-Trading",
-        "cache_dir": "~/.vibe-trading/live/ibkr/oauth",
-    },
-    "enabled_tools": ["*"],
-}
 
 
 def _to_camel(name: str) -> str:

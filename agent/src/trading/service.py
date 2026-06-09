@@ -14,12 +14,6 @@ RUNNER_CAPABILITY = "runner.manage.requires_mandate"
 #: ``get_account_snapshot``, ``get_positions``, ``get_open_orders``, ``get_quote``,
 #: ``get_historical_bars``).
 _SDK_CONNECTOR_MODULES = {
-    "tiger": "src.trading.connectors.tiger.sdk",
-    "longbridge": "src.trading.connectors.longbridge.sdk",
-    "alpaca": "src.trading.connectors.alpaca.sdk",
-    "okx": "src.trading.connectors.okx.sdk",
-    "binance": "src.trading.connectors.binance.sdk",
-    "futu": "src.trading.connectors.futu.sdk",
     "dhan": "src.trading.connectors.dhan.sdk",
     "shoonya": "src.trading.connectors.shoonya.sdk",
 }
@@ -38,17 +32,6 @@ def _sdk_module(connector: str):
 def check_connection(profile_id: str | None = None, **overrides: Any) -> dict[str, Any]:
     """Check a connector profile without mutating broker state."""
     profile = profile_by_id(profile_id)
-    if profile.transport == "local_tws":
-        from src.trading.connectors.ibkr.local import check_local_status
-
-        cfg = _ibkr_config(profile, overrides)
-        report = check_local_status(cfg)
-        report["profile_id"] = profile.id
-        report["connector"] = profile.connector
-        report["environment"] = profile.environment
-        report["transport"] = profile.transport
-        return report
-
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
         report = module.check_status(module.build_config(profile.config, overrides))
@@ -64,10 +47,6 @@ def check_connection(profile_id: str | None = None, **overrides: Any) -> dict[st
 def get_account(profile_id: str | None = None, **overrides: Any) -> dict[str, Any]:
     """Read account summary for a connector profile."""
     profile = profile_by_id(profile_id)
-    if profile.transport == "local_tws":
-        from src.trading.connectors.ibkr.local import get_account_snapshot
-
-        return _with_profile(profile, get_account_snapshot(_ibkr_config(profile, overrides)))
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
         return _with_profile(profile, module.get_account_snapshot(module.build_config(profile.config, overrides)))
@@ -77,10 +56,6 @@ def get_account(profile_id: str | None = None, **overrides: Any) -> dict[str, An
 def get_positions(profile_id: str | None = None, **overrides: Any) -> dict[str, Any]:
     """Read positions for a connector profile."""
     profile = profile_by_id(profile_id)
-    if profile.transport == "local_tws":
-        from src.trading.connectors.ibkr.local import get_positions as _get_positions
-
-        return _with_profile(profile, _get_positions(_ibkr_config(profile, overrides)))
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
         return _with_profile(profile, module.get_positions(module.build_config(profile.config, overrides)))
@@ -95,13 +70,6 @@ def get_open_orders(
 ) -> dict[str, Any]:
     """Read open orders for a connector profile."""
     profile = profile_by_id(profile_id)
-    if profile.transport == "local_tws":
-        from src.trading.connectors.ibkr.local import get_open_orders as _get_open_orders
-
-        return _with_profile(
-            profile,
-            _get_open_orders(_ibkr_config(profile, overrides), include_executions=include_executions),
-        )
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
         return _with_profile(
@@ -122,19 +90,6 @@ def get_quote(
 ) -> dict[str, Any]:
     """Read a quote for a connector profile."""
     profile = profile_by_id(profile_id)
-    if profile.transport == "local_tws":
-        from src.trading.connectors.ibkr.local import get_quote as _get_quote
-
-        return _with_profile(
-            profile,
-            _get_quote(
-                symbol,
-                config=_ibkr_config(profile, overrides),
-                exchange=exchange,
-                currency=currency,
-                sec_type=sec_type,
-            ),
-        )
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
         return _with_profile(profile, module.get_quote(symbol, config=module.build_config(profile.config, overrides)))
@@ -164,23 +119,6 @@ def get_history(
     understands and maps to its own SDK tokens.
     """
     profile = profile_by_id(profile_id)
-    if profile.transport == "local_tws":
-        from src.trading.connectors.ibkr.local import get_historical_bars
-
-        return _with_profile(
-            profile,
-            get_historical_bars(
-                symbol,
-                config=_ibkr_config(profile, overrides),
-                exchange=exchange,
-                currency=currency,
-                sec_type=sec_type,
-                duration=duration,
-                bar_size=bar_size,
-                what_to_show=what_to_show,
-                use_rth=use_rth,
-            ),
-        )
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
         return _with_profile(
@@ -198,12 +136,6 @@ def get_history(
 #: Connector → (instrument type, fixed asset class | None). ``None`` asset class
 #: means "infer from the symbol's market" (multi-market equity connectors).
 _CONNECTOR_INSTRUMENT = {
-    "okx": ("crypto", "crypto"),
-    "binance": ("crypto", "crypto"),
-    "alpaca": ("equity", "us_equity"),
-    "tiger": ("equity", None),
-    "longbridge": ("equity", None),
-    "futu": ("equity", None),
 }
 
 
@@ -394,10 +326,6 @@ def connector_profile_id_for_broker(broker: str) -> str:
 
 def runner_tool_name(connector: str, operation: str) -> str | None:
     """Map a runner operation to a connector-specific remote MCP tool name."""
-    if connector == "robinhood":
-        from src.trading.connectors.robinhood.mcp import runner_tool_name as _runner_tool_name
-
-        return _runner_tool_name(operation)
     return None
 
 
@@ -409,24 +337,6 @@ def _with_profile(profile: TradingProfile, payload: dict[str, Any]) -> dict[str,
     result["environment"] = profile.environment
     result["transport"] = profile.transport
     return result
-
-
-def _ibkr_config(profile: TradingProfile, overrides: dict[str, Any]):
-    """Build an IBKR local config from a trading profile and call overrides."""
-    from src.trading.connectors.ibkr.local import IBKRLocalConfig, config_path, load_config
-
-    default_cfg = IBKRLocalConfig.from_mapping(profile.config)
-    base = load_config()
-    if config_path().exists() and base.profile == default_cfg.profile:
-        cfg = base
-    else:
-        cfg = default_cfg
-    return cfg.with_overrides(
-        host=_clean(overrides.get("host")),
-        port=_int_or_none(overrides.get("port")),
-        client_id=_int_or_none(overrides.get("client_id")),
-        account=_clean(overrides.get("account")),
-    )
 
 
 def _remote_status(profile: TradingProfile) -> dict[str, Any]:
@@ -520,19 +430,11 @@ def _call_remote(profile: TradingProfile, operation: str, arguments: dict[str, A
 
 def _remote_tool_name(connector: str, operation: str) -> str | None:
     """Map generic read operations to current remote MCP tool names."""
-    if connector == "robinhood":
-        from src.trading.connectors.robinhood.mcp import remote_tool_name
-
-        return remote_tool_name(operation)
     return None
 
 
 def _remote_arguments(connector: str, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Normalize generic arguments for a remote MCP operation."""
-    if connector == "robinhood":
-        from src.trading.connectors.robinhood.mcp import remote_arguments
-
-        return remote_arguments(operation, arguments)
     return {}
 
 

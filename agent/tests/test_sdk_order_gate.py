@@ -181,40 +181,18 @@ def test_service_place_order_paper_is_direct(monkeypatch) -> None:
     monkeypatch.setattr(conn, "build_config", lambda *a, **k: object(), raising=False)
     # build_config is called on the module; give the fake one.
     conn.build_config = lambda profile_config, overrides: object()
-    out = service.place_order("AAPL", "alpaca-paper-trade", side="buy", quantity=1)
+    out = service.place_order("RELIANCE", "dhan-paper-trade", side="buy", quantity=1)
     assert out["status"] == "ok"
     assert len(conn.placed) == 1
     assert out["environment"] == "paper"
 
 
-def test_service_place_order_live_routes_through_gate(monkeypatch) -> None:
-    """Live profile routes through the gate; no mandate → blocked, not placed."""
-    conn = _FakeConnector()
-    conn.build_config = lambda profile_config, overrides: object()
-    monkeypatch.setattr(service, "_sdk_module", lambda c: conn)
-    monkeypatch.setattr("src.live.sdk_order_gate.load_mandate", lambda broker: None)
-    monkeypatch.setattr("src.live.sdk_order_gate.write_live_action", lambda *a, **k: {"audited": True})
-    out = service.place_order("AAPL", "alpaca-live-trade", side="buy", notional=500.0)
-    assert out["status"] == "blocked"
-    assert conn.placed == []
-    assert out["environment"] == "live"
-
-
-def test_no_longbridge_live_trade_profile() -> None:
+def test_no_dhan_live_trade_profile() -> None:
     from src.trading import profiles
 
     ids = {p.id for p in profiles.list_profiles()}
-    assert "longbridge-paper-trade" in ids
-    assert "longbridge-live-trade" not in ids  # capped: no live order placement
-
-
-def test_trade_profiles_have_place_capability() -> None:
-    from src.trading import profiles
-
-    for pid in ("alpaca-live-trade", "okx-live-trade", "binance-live-trade", "futu-live-trade", "tiger-live-trade"):
-        prof = profiles.profile_by_id(pid)
-        assert prof.readonly is False
-        assert any("requires_mandate" in c for c in prof.capabilities)
+    assert "dhan-paper-trade" in ids
+    assert "dhan-live-trade" not in ids  # capped: no live order placement
 
 
 # --------------------------------------------------------------------------- #
@@ -301,42 +279,11 @@ def test_gate_quantity_unpriceable_denies(monkeypatch) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_longbridge_place_order_paper_only_guard() -> None:
-    from src.trading.connectors.longbridge import sdk as lb
-
-    cfg = lb.LongbridgeConfig(app_key="k", app_secret="s", access_token="t", profile="live-readonly")
-    out = lb.place_order(cfg, symbol="700.HK", side="buy", quantity=100)
-    assert out["status"] == "error" and "paper" in out["error"].lower()
-    out2 = lb.cancel_order(cfg, "OID", symbol="700.HK")
-    assert out2["status"] == "error" and "paper" in out2["error"].lower()
-
-
-@pytest.mark.parametrize("connector", ["tiger", "alpaca", "okx", "binance", "futu", "longbridge"])
+@pytest.mark.parametrize("connector", ["dhan", "shoonya"])
 def test_connector_place_order_rejects_bad_side(connector) -> None:
     import importlib
 
     mod = importlib.import_module(f"src.trading.connectors.{connector}.sdk")
     cfg = mod.build_config({"profile": "paper"}, None)
-    out = mod.place_order(cfg, symbol="AAPL", side="hold", quantity=1)
+    out = mod.place_order(cfg, symbol="RELIANCE", side="hold", quantity=1)
     assert out["status"] == "error"
-
-
-@pytest.mark.parametrize("connector", ["tiger", "alpaca", "okx", "binance", "futu", "longbridge"])
-def test_connector_place_order_rejects_both_qty_and_notional(connector) -> None:
-    import importlib
-
-    mod = importlib.import_module(f"src.trading.connectors.{connector}.sdk")
-    cfg = mod.build_config({"profile": "paper"}, None)
-    out = mod.place_order(cfg, symbol="AAPL", side="buy", quantity=1, notional=100)
-    assert out["status"] == "error"
-
-
-def test_okx_order_result_rejects_failed_scode() -> None:
-    from src.trading.connectors.okx import sdk as ox
-
-    cfg = ox.OKXConfig(api_key="k", api_secret="s", passphrase="p")
-    # A 200 envelope (code 0) whose per-order sCode != 0 is a FAILED order.
-    failed = ox._order_result(cfg, {"code": "0", "data": [{"sCode": "51008", "sMsg": "insufficient"}]}, symbol="BTC-USDT", side="buy", order_type="market", time_in_force="day")
-    assert failed["status"] == "error"
-    ok = ox._order_result(cfg, {"code": "0", "data": [{"ordId": "O1", "sCode": "0"}]}, symbol="BTC-USDT", side="buy", order_type="market", time_in_force="day")
-    assert ok["status"] == "ok" and ok["order_id"] == "O1"

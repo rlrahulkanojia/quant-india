@@ -65,25 +65,19 @@ def test_live_status_dormant_by_default(tmp_path: Path, monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["global_halted"] is False
-    brokers = {b["auth"]["broker"]: b for b in body["brokers"]}
-    assert "robinhood" in brokers
-    rh = brokers["robinhood"]
-    # Channel is OFF until OAuth + mandate: no token, no mandate, runner dead.
-    assert rh["auth"]["oauth_token_present"] is False
-    assert rh["auth"]["is_live_broker"] is True
-    assert rh["mandate"] is None
-    assert rh["runner"]["alive"] is False
-    assert rh["halted"] is False
+    # No live MCP brokers configured in the India-only fork
+    assert body["brokers"] == []
 
 
-def test_live_status_single_broker_filter(tmp_path: Path, monkeypatch) -> None:
+def test_live_status_unknown_broker_not_live(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
 
-    response = client.get("/live/status", params={"broker": "Robinhood "})
+    response = client.get("/live/status", params={"broker": "unknown_broker"})
 
     assert response.status_code == 200
     body = response.json()
-    assert [b["auth"]["broker"] for b in body["brokers"]] == ["robinhood"]
+    assert len(body["brokers"]) == 1
+    assert body["brokers"][0]["auth"]["is_live_broker"] is False
 
 
 def test_live_status_blank_broker_rejected(tmp_path: Path, monkeypatch) -> None:
@@ -94,45 +88,19 @@ def test_live_status_blank_broker_rejected(tmp_path: Path, monkeypatch) -> None:
     assert response.status_code == 400
 
 
-def test_live_status_reflects_active_mandate(tmp_path: Path, monkeypatch) -> None:
-    client = _client(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        api_server, "_active_mandate_state", lambda broker: _valid_mandate_state(broker)
-    )
-
-    response = client.get("/live/status", params={"broker": "robinhood"})
-
-    assert response.status_code == 200
-    rh = response.json()["brokers"][0]
-    assert rh["mandate"]["expired"] is False
-    assert rh["mandate"]["limits"]["max_order_notional_usd"] == 750.0
-
-
 # --------------------------------------------------------------------------- #
 # C2 — POST /live/authorize (discover-only on-ramp; never authorizes server-side)
 # --------------------------------------------------------------------------- #
 
 
-def test_authorize_onramp_describes_cli_flow(tmp_path: Path, monkeypatch) -> None:
-    client = _client(tmp_path, monkeypatch)
-
-    response = client.post("/live/authorize", json={"broker": "robinhood"})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["broker"] == "robinhood"
-    assert body["connector_profile"] == "robinhood-live-mcp"
-    assert body["oauth_token_present"] is False
-    # On-ramp must point at the desktop CLI flow and never return a token.
-    assert "vibe-trading connector authorize robinhood-live-mcp" in body["instruction"]
-    assert "token" not in body
-
-
 def test_authorize_unknown_broker_rejected(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
 
+    # No live MCP brokers configured in the India-only fork
     response = client.post("/live/authorize", json={"broker": "etrade"})
+    assert response.status_code == 400
 
+    response = client.post("/live/authorize", json={"broker": "robinhood"})
     assert response.status_code == 400
 
 
@@ -141,102 +109,23 @@ def test_authorize_unknown_broker_rejected(tmp_path: Path, monkeypatch) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_runner_start_requires_committed_mandate(tmp_path: Path, monkeypatch) -> None:
+def test_runner_start_unknown_broker_rejected(tmp_path: Path, monkeypatch) -> None:
+    """No live MCP brokers configured — runner start is rejected."""
     client = _client(tmp_path, monkeypatch)
 
     response = client.post("/live/runner/start", json={"broker": "robinhood"})
 
-    assert response.status_code == 409
-    assert "mandate" in response.json()["detail"].lower()
+    # robinhood is no longer a known live broker
+    assert response.status_code in (400, 409)
 
 
-def test_runner_start_rejects_readonly_connector_without_runner(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_stop_rejects_unknown_broker(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
 
-    response = client.post("/live/runner/start", json={"broker": "ibkr"})
+    # No live runner profiles configured for robinhood in India-only fork
+    response = client.post("/live/runner/stop", json={"broker": "robinhood"})
 
     assert response.status_code == 400
-    detail = response.json()["detail"].lower()
-    assert "ibkr" in detail
-    assert "runner" in detail
-
-
-def test_runner_start_blocked_by_kill_switch(tmp_path: Path, monkeypatch) -> None:
-    client = _client(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        api_server, "_active_mandate_state", lambda broker: _valid_mandate_state(broker)
-    )
-    from src.live.halt import trip_halt
-
-    trip_halt(by="test", reason="safety", broker="robinhood")
-
-    response = client.post("/live/runner/start", json={"broker": "robinhood"})
-
-    assert response.status_code == 409
-    assert "kill switch" in response.json()["detail"].lower()
-
-
-def test_runner_start_success_then_idempotent(tmp_path: Path, monkeypatch) -> None:
-    client = _client(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        api_server, "_active_mandate_state", lambda broker: _valid_mandate_state(broker)
-    )
-    monkeypatch.setattr(api_server, "_runner_factory", lambda broker: SimpleNamespace(broker=broker))
-
-    async def _noop_drive(runner) -> None:  # never spawns a real agent/broker loop
-        return None
-
-    monkeypatch.setattr(api_server, "_drive_runner", _noop_drive)
-
-    first = client.post("/live/runner/start", json={"broker": "robinhood"})
-    assert first.status_code == 200
-    assert first.json() == {"broker": "robinhood", "started": True, "already_running": False}
-
-    # Pre-seed a still-pending task so the idempotency branch is deterministic.
-    class _PendingTask:
-        def done(self) -> bool:
-            return False
-
-        def cancel(self) -> None:
-            self._cancelled = True
-
-    monkeypatch.setattr(api_server, "_runner_tasks", {"robinhood": _PendingTask()})
-
-    second = client.post("/live/runner/start", json={"broker": "robinhood"})
-    assert second.status_code == 200
-    assert second.json()["already_running"] is True
-
-
-def test_runner_stop_idempotent_when_not_running(tmp_path: Path, monkeypatch) -> None:
-    client = _client(tmp_path, monkeypatch)
-
-    response = client.post("/live/runner/stop", json={"broker": "robinhood"})
-
-    assert response.status_code == 200
-    assert response.json() == {"broker": "robinhood", "stopped": False, "was_running": False}
-
-
-def test_runner_stop_cancels_running_task(tmp_path: Path, monkeypatch) -> None:
-    client = _client(tmp_path, monkeypatch)
-
-    cancelled = {"value": False}
-
-    class _PendingTask:
-        def done(self) -> bool:
-            return False
-
-        def cancel(self) -> None:
-            cancelled["value"] = True
-
-    monkeypatch.setattr(api_server, "_runner_tasks", {"robinhood": _PendingTask()})
-
-    response = client.post("/live/runner/stop", json={"broker": "robinhood"})
-
-    assert response.status_code == 200
-    assert response.json() == {"broker": "robinhood", "stopped": True, "was_running": True}
-    assert cancelled["value"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -328,51 +217,28 @@ def test_build_live_runner_no_broker_configured_raises_unavailable(tmp_path, mon
         api_server._build_live_runner("robinhood")
 
 
-def test_build_live_runner_wires_a_real_runner(tmp_path, monkeypatch) -> None:
+def test_build_live_runner_raises_for_removed_broker(tmp_path, monkeypatch) -> None:
+    """Robinhood runner wiring removed in India-only fork — raises unavailable."""
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path), raising=False)
     monkeypatch.setattr(api_server, "_runner_factory", None, raising=False)
 
-    # Stub the broker adapter + session service so no real broker/agent is hit.
     class _StubAdapter:
         def call_tool(self, name, args):
             return {"status": "ok", "result": {}}
 
-    class _StubSession:
-        session_id = "live-sess-1"
-
-    class _StubSvc:
-        event_bus = SimpleNamespace(emit=lambda *a, **k: None)
-
-        def create_session(self, title=""):
-            return _StubSession()
-
-        async def send_message(self, sid, content, **kw):
-            return {"message_id": "m1", "attempt_id": "a1"}
-
     monkeypatch.setattr(api_server, "_live_broker_adapter", lambda broker: _StubAdapter())
-    monkeypatch.setattr(api_server, "_get_session_service", lambda: _StubSvc())
 
-    runner = api_server._build_live_runner("robinhood")
-    # Constructs without TypeError and exposes the R2 contract.
-    assert runner.broker == "robinhood"
-    assert hasattr(runner, "run_once") and hasattr(runner, "run_loop")
-    assert runner.runner_id == "robinhood"
+    import pytest
+    with pytest.raises(api_server.LiveRunnerUnavailable):
+        api_server._build_live_runner("robinhood")
 
 
-def test_runner_start_returns_503_when_broker_unavailable(tmp_path, monkeypatch) -> None:
+def test_runner_start_rejects_unknown_broker(tmp_path, monkeypatch) -> None:
+    """Runner start returns 400 for brokers with no live runner profile."""
     client = _client(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        api_server, "_active_mandate_state", lambda broker: _valid_mandate_state(broker)
-    )
-
-    def _boom(broker):
-        raise api_server.LiveRunnerUnavailable("no MCP server configured for live broker 'robinhood'")
-
-    monkeypatch.setattr(api_server, "_runner_factory", _boom)
 
     response = client.post("/live/runner/start", json={"broker": "robinhood"})
-    assert response.status_code == 503
-    assert "configured" in response.json()["detail"]
+    assert response.status_code == 400
 
 
 # --------------------------------------------------------------------------- #

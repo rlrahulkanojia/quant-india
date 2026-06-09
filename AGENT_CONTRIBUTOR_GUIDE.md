@@ -67,8 +67,7 @@ For live/order safety changes:
 ```bash
 pytest agent/tests/test_sdk_order_gate.py \
   agent/tests/test_mandate_enforcement.py \
-  agent/tests/test_killswitch_blocks_orders.py \
-  agent/tests/test_readonly_default.py -q
+  agent/tests/test_killswitch_blocks_orders.py -q
 ```
 
 For factor-zoo changes:

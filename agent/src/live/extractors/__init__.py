@@ -15,9 +15,6 @@ from __future__ import annotations
 from typing import Callable
 
 from src.live.enforcement import OrderIntent
-from src.trading.connectors.robinhood.extractor import (
-    extract_order_intent as _robinhood_extract,
-)
 
 #: Signature every broker extractor satisfies.
 OrderIntentExtractor = Callable[[str, dict], "OrderIntent | None"]
@@ -25,7 +22,6 @@ OrderIntentExtractor = Callable[[str, dict], "OrderIntent | None"]
 #: Broker key → order-intent extractor. Broker-specific parsers live with their
 #: connector package; this module is only the live-safety lookup table.
 BROKER_EXTRACTORS: dict[str, OrderIntentExtractor] = {
-    "robinhood": _robinhood_extract,
 }
 
 
