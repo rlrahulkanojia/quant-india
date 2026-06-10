@@ -12,7 +12,7 @@ interface StockDetail { fundamentals: Record<string, any>; ratings: Record<strin
 // ── Formatters ───────────────────────────────────────────────────────────────
 
 const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtCr = (n: number) => `₹${(n / 10_000_000).toFixed(0)} Cr`;
+const fmtCr = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })} Cr`;
 const fmtLakh = (n: number) => `₹${(n / 100_000).toFixed(1)}L`;
 const fmtMcap = (n: number) => n >= 1e12 ? `₹${(n / 1e12).toFixed(2)}T` : n >= 1e9 ? `₹${(n / 1e9).toFixed(0)}B` : fmtCr(n);
 const pctClass = (n: number) => n > 0 ? "text-emerald-400" : n < 0 ? "text-red-400" : "text-gray-400";
