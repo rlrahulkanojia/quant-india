@@ -19,6 +19,15 @@ const Correlation = lazy(() =>
 const AlphaZoo = lazy(() =>
   import("@/pages/AlphaZoo").then((m) => ({ default: m.AlphaZoo })),
 );
+const Portfolio = lazy(() =>
+  import("@/pages/Portfolio").then((m) => ({ default: m.Portfolio })),
+);
+const TradeHistory = lazy(() =>
+  import("@/pages/TradeHistory").then((m) => ({ default: m.TradeHistory })),
+);
+const ShadowAccount = lazy(() =>
+  import("@/pages/ShadowAccount").then((m) => ({ default: m.ShadowAccount })),
+);
 
 function PageLoader() {
   return (
@@ -46,6 +55,9 @@ export const router = createBrowserRouter([
       { path: "/runs/:runId", element: wrap(RunDetail) },
       { path: "/compare", element: wrap(Compare) },
       { path: "/correlation", element: wrap(Correlation) },
+      { path: "/portfolio", element: wrap(Portfolio) },
+      { path: "/trades", element: wrap(TradeHistory) },
+      { path: "/shadow", element: wrap(ShadowAccount) },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/bench", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/compare", element: wrap(AlphaZoo) },

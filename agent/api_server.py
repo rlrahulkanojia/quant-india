@@ -1489,6 +1489,109 @@ async def get_correlation_matrix(
         raise HTTPException(status_code=500, detail=f"Correlation computation failed: {exc}")
 
 
+# ============================================================================
+# Dashboard API — Portfolio, Trades, Shadow Account, Decisions
+# ============================================================================
+
+_PAPER_DB = os.path.expanduser(os.environ.get("DATA_DIR", "~/.quant-india") + "/paper.db")
+_DECISION_DB = os.path.expanduser(os.environ.get("DATA_DIR", "~/.quant-india") + "/decisions.db")
+
+
+@app.get("/api/portfolio")
+async def get_portfolio():
+    """Paper portfolio summary — cash, positions, P&L."""
+    from src.paper.store import PaperStore
+
+    if not os.path.exists(_PAPER_DB):
+        return {"cash": 0, "positions": [], "unrealized_pnl": 0, "realized_pnl": 0,
+                "total_value": 0, "total_fees_paid": 0, "initialized": False}
+
+    store = PaperStore(_PAPER_DB)
+    portfolio = store.get_portfolio()
+    if portfolio is None:
+        return {"cash": 0, "positions": [], "unrealized_pnl": 0, "realized_pnl": 0,
+                "total_value": 0, "total_fees_paid": 0, "initialized": False}
+
+    positions = store.get_positions()
+    orders = store.list_orders()
+    total_fees = sum(o.get("fees_total", 0) or 0 for o in orders if o.get("status") == "FILLED")
+
+    return {
+        "cash": portfolio["cash_balance"],
+        "positions": positions,
+        "unrealized_pnl": sum(p.get("unrealized_pnl", 0) or 0 for p in positions),
+        "realized_pnl": portfolio.get("total_realized", 0),
+        "total_value": portfolio["cash_balance"] + sum(
+            (p.get("avg_price", 0) * p.get("qty", 0)) for p in positions
+        ),
+        "total_fees_paid": total_fees,
+        "initialized": True,
+    }
+
+
+@app.get("/api/trades")
+async def get_trades():
+    """Paper trade order history."""
+    from src.paper.store import PaperStore
+
+    if not os.path.exists(_PAPER_DB):
+        return {"orders": [], "total_count": 0}
+
+    store = PaperStore(_PAPER_DB)
+    orders = store.list_orders()
+    return {"orders": orders, "total_count": len(orders)}
+
+
+@app.get("/api/shadow")
+async def get_shadow_report(days: int = Query(7, ge=1, le=90)):
+    """Shadow account divergence report."""
+    from datetime import datetime, timedelta
+    from src.paper.store import PaperStore
+
+    if not os.path.exists(_PAPER_DB):
+        return {"fills": [], "avg_divergence_pct": 0, "max_divergence_pct": 0,
+                "fill_count": 0, "paper_total": 0, "market_total": 0, "divergence_cost": 0}
+
+    store = PaperStore(_PAPER_DB)
+    since = (datetime.now() - timedelta(days=days)).isoformat()
+    fills = store.get_all_shadow_fills_since(since)
+
+    if not fills:
+        return {"fills": [], "avg_divergence_pct": 0, "max_divergence_pct": 0,
+                "fill_count": 0, "paper_total": 0, "market_total": 0, "divergence_cost": 0}
+
+    divergences = [f.get("divergence_pct", 0) for f in fills]
+    paper_total = sum(f.get("paper_fill_price", 0) * f.get("qty", 1) for f in fills)
+    market_total = sum(f.get("market_ltp", 0) * f.get("qty", 1) for f in fills)
+
+    return {
+        "fills": fills,
+        "avg_divergence_pct": sum(divergences) / len(divergences),
+        "max_divergence_pct": max(abs(d) for d in divergences),
+        "fill_count": len(fills),
+        "paper_total": paper_total,
+        "market_total": market_total,
+        "divergence_cost": paper_total - market_total,
+    }
+
+
+@app.get("/api/decisions")
+async def get_decisions(days: int = Query(7, ge=1, le=90)):
+    """Recent AI trade decisions."""
+    from datetime import datetime, timedelta
+    from src.decisions.store import DecisionStore
+
+    if not os.path.exists(_DECISION_DB):
+        return {"decisions": [], "total_count": 0}
+
+    store = DecisionStore(_DECISION_DB)
+    since = (datetime.now() - timedelta(days=days)).isoformat()
+    decisions = store.list_decisions(since_date=since, limit=100)
+    return {"decisions": decisions, "total_count": len(decisions)}
+
+
+# ============================================================================
+
 def _terminate_current_process() -> None:
     """Stop the current API process after the response has been sent."""
     time.sleep(0.25)
@@ -3062,7 +3165,7 @@ async def stop_runner_endpoint(payload: LiveRunnerControlRequest):
 # ============================================================================
 
 from src.api.alpha_routes import register_alpha_routes  # noqa: E402
-register_alpha_routes(app)
+register_alpha_routes(app, require_auth=require_auth, require_event_stream_auth=require_event_stream_auth)
 
 
 # ============================================================================

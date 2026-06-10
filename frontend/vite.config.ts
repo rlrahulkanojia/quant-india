@@ -44,6 +44,8 @@ export default defineConfig(({ mode }) => {
         "/runs": apiProxy,
         "/correlation": apiProxyWithHtmlFallback,
         "^/alpha(?:/|$)": apiProxy,
+        "/api": apiProxy,
+        "/health": apiProxy,
       },
     },
     build: {
