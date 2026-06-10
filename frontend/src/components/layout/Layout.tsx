@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, Wallet, ArrowLeftRight, Eye } from "lucide-react";
+import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, Wallet, ArrowLeftRight, Eye, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { api, type SessionItem } from "@/lib/api";
@@ -12,6 +12,7 @@ const APP_VERSION = "v0.1.9";
 
 const NAV = [
   { to: "/", icon: BarChart3, label: "Home" },
+  { to: "/market", icon: Activity, label: "Market" },
   { to: "/portfolio", icon: Wallet, label: "Portfolio" },
   { to: "/trades", icon: ArrowLeftRight, label: "Trades" },
   { to: "/shadow", icon: Eye, label: "Shadow" },

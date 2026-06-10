@@ -1490,6 +1490,241 @@ async def get_correlation_matrix(
 
 
 # ============================================================================
+# Market Dashboard API — Live indices, movers, FII/DII, news, stock detail
+# ============================================================================
+
+_INDEX_TOKENS = {
+    "NIFTY 50": ("NSE", "Nifty 50", "99926000"),
+    "SENSEX": ("BSE", "SENSEX", "99919000"),
+    "BANKNIFTY": ("NSE", "Nifty Bank", "99926009"),
+    "NIFTY IT": ("NSE", "Nifty IT", "99926013"),
+}
+
+_STOCK_TOKENS = {
+    "RELIANCE": "2885", "INFY": "1594", "TCS": "11536", "HDFCBANK": "1333",
+    "ICICIBANK": "4963", "SBIN": "3045", "TATAMOTORS": "3456", "WIPRO": "3787",
+    "BAJFINANCE": "317", "LT": "11483", "SUNPHARMA": "3351", "MARUTI": "10999",
+    "ASIANPAINT": "236", "TITAN": "3506", "AXISBANK": "5900", "KOTAKBANK": "1922",
+    "ADANIENT": "25", "HINDUNILVR": "1394", "BHARTIARTL": "10604", "ITC": "1660",
+}
+
+
+def _get_angelone():
+    """Lazy AngelOne client — cached for the process lifetime."""
+    from SmartApi import SmartConnect
+    import pyotp
+
+    api_key = os.environ.get("ANGELONE_API_KEY", "")
+    client_id = os.environ.get("ANGELONE_CLIENT_ID", "")
+    if not api_key or not client_id:
+        return None
+    obj = SmartConnect(api_key=api_key)
+    totp_secret = os.environ.get("ANGELONE_TOTP_SECRET", "")
+    totp = pyotp.TOTP(totp_secret).now() if totp_secret else ""
+    obj.generateSession(client_id, os.environ.get("ANGELONE_PASSWORD", ""), totp)
+    return obj
+
+
+@app.get("/api/market/indices")
+async def get_market_indices():
+    """Live index data — NIFTY 50, SENSEX, BANKNIFTY, NIFTY IT."""
+    try:
+        client = _get_angelone()
+        if client is None:
+            return {"indices": [], "error": "AngelOne not configured"}
+
+        indices = []
+        for name, (exchange, symbol, token) in _INDEX_TOKENS.items():
+            try:
+                data = client.ltpData(exchange, symbol, token)
+                if data.get("status") and data.get("data"):
+                    d = data["data"]
+                    ltp = d.get("ltp", 0)
+                    prev_close = d.get("close", ltp)
+                    change = ltp - prev_close
+                    change_pct = (change / prev_close * 100) if prev_close else 0
+                    indices.append({
+                        "name": name, "ltp": ltp,
+                        "open": d.get("open", 0), "high": d.get("high", 0),
+                        "low": d.get("low", 0), "prev_close": prev_close,
+                        "change": round(change, 2), "change_pct": round(change_pct, 2),
+                    })
+            except Exception:
+                continue
+        return {"indices": indices}
+    except Exception as e:
+        return {"indices": [], "error": str(e)}
+
+
+@app.get("/api/market/movers")
+async def get_market_movers():
+    """Top gainers and losers from NIFTY50 watchlist."""
+    try:
+        client = _get_angelone()
+        if client is None:
+            return {"gainers": [], "losers": [], "error": "AngelOne not configured"}
+
+        stocks = []
+        for symbol, token in _STOCK_TOKENS.items():
+            try:
+                data = client.ltpData("NSE", f"{symbol}-EQ", token)
+                if data.get("status") and data.get("data"):
+                    d = data["data"]
+                    ltp = d.get("ltp", 0)
+                    prev_close = d.get("close", ltp)
+                    change_pct = ((ltp - prev_close) / prev_close * 100) if prev_close else 0
+                    stocks.append({
+                        "symbol": symbol, "ltp": ltp,
+                        "prev_close": prev_close,
+                        "change": round(ltp - prev_close, 2),
+                        "change_pct": round(change_pct, 2),
+                        "high": d.get("high", 0), "low": d.get("low", 0),
+                    })
+            except Exception:
+                continue
+
+        stocks.sort(key=lambda x: x["change_pct"], reverse=True)
+        return {
+            "gainers": stocks[:5],
+            "losers": stocks[-5:][::-1],
+            "all": stocks,
+        }
+    except Exception as e:
+        return {"gainers": [], "losers": [], "error": str(e)}
+
+
+@app.get("/api/market/fiidii")
+async def get_fiidii():
+    """Today's FII/DII activity from NSE."""
+    import requests as _requests
+
+    try:
+        session = _requests.Session()
+        headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+        session.get("https://www.nseindia.com", headers=headers, timeout=5)
+        resp = session.get("https://www.nseindia.com/api/fiidiiTradeReact", headers=headers, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            result = {}
+            for entry in data:
+                cat = entry.get("category", "").upper()
+                key = "fii" if "FII" in cat or "FPI" in cat else "dii" if "DII" in cat else None
+                if key:
+                    result[key] = {
+                        "buy": float(entry.get("buyValue", 0)),
+                        "sell": float(entry.get("sellValue", 0)),
+                        "net": float(entry.get("netValue", 0)),
+                        "date": entry.get("date", ""),
+                    }
+            return {"status": "ok", **result}
+        return {"status": "error", "error": f"NSE returned {resp.status_code}"}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "fii": {"buy": 0, "sell": 0, "net": 0}, "dii": {"buy": 0, "sell": 0, "net": 0}}
+
+
+@app.get("/api/market/news")
+async def get_market_news():
+    """Latest Indian market news from RSS feeds."""
+    import requests as _requests
+    import xml.etree.ElementTree as ET
+
+    articles = []
+    feeds = [
+        ("Economic Times", "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
+        ("Google News", "https://news.google.com/rss/search?q=NSE+BSE+stock+market+India&hl=en-IN&gl=IN&ceid=IN:en"),
+    ]
+
+    for source, url in feeds:
+        try:
+            resp = _requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+            root = ET.fromstring(resp.content)
+            for item in root.findall(".//item")[:10]:
+                title = item.find("title")
+                pub = item.find("pubDate")
+                link = item.find("link")
+                if title is not None and title.text:
+                    articles.append({
+                        "title": title.text.strip(),
+                        "source": source,
+                        "published": pub.text.strip() if pub is not None and pub.text else "",
+                        "url": link.text.strip() if link is not None and link.text else "",
+                    })
+        except Exception:
+            continue
+
+    # Sort by published date descending, deduplicate by title
+    seen = set()
+    unique = []
+    for a in articles:
+        key = a["title"][:50]
+        if key not in seen:
+            seen.add(key)
+            unique.append(a)
+
+    return {"articles": unique[:20]}
+
+
+@app.get("/api/market/stock/{symbol}")
+async def get_stock_detail(symbol: str):
+    """Fundamentals + analyst ratings for a single stock via yfinance."""
+    import yfinance as yf
+
+    try:
+        ticker = yf.Ticker(f"{symbol.upper()}.NS")
+        info = ticker.info
+
+        fundamentals = {
+            "symbol": symbol.upper(),
+            "name": info.get("longName", symbol),
+            "sector": info.get("sector", ""),
+            "industry": info.get("industry", ""),
+            "market_cap": info.get("marketCap", 0),
+            "pe_trailing": info.get("trailingPE", None),
+            "pe_forward": info.get("forwardPE", None),
+            "roe": info.get("returnOnEquity", None),
+            "eps": info.get("trailingEps", None),
+            "book_value": info.get("bookValue", None),
+            "dividend_yield": info.get("dividendYield", None),
+            "debt_to_equity": info.get("debtToEquity", None),
+            "fifty_two_week_high": info.get("fiftyTwoWeekHigh", None),
+            "fifty_two_week_low": info.get("fiftyTwoWeekLow", None),
+            "avg_volume": info.get("averageVolume", 0),
+            "target_price": info.get("targetMeanPrice", None),
+            "recommendation": info.get("recommendationKey", ""),
+            "analyst_count": info.get("numberOfAnalystOpinions", 0),
+        }
+
+        # Analyst ratings breakdown
+        recs = ticker.recommendations
+        ratings = None
+        if recs is not None and not recs.empty:
+            latest = recs.iloc[0]
+            ratings = {
+                "strong_buy": int(latest.get("strongBuy", 0)),
+                "buy": int(latest.get("buy", 0)),
+                "hold": int(latest.get("hold", 0)),
+                "sell": int(latest.get("sell", 0)),
+                "strong_sell": int(latest.get("strongSell", 0)),
+            }
+
+        # 30-day price history for sparkline
+        hist = ticker.history(period="1mo")
+        price_history = [
+            {"date": d.strftime("%Y-%m-%d"), "close": round(row["Close"], 2)}
+            for d, row in hist.iterrows()
+        ] if not hist.empty else []
+
+        return {
+            "status": "ok",
+            "fundamentals": fundamentals,
+            "ratings": ratings,
+            "price_history": price_history,
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+# ============================================================================
 # Dashboard API — Portfolio, Trades, Shadow Account, Decisions
 # ============================================================================
 

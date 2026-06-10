@@ -28,6 +28,9 @@ const TradeHistory = lazy(() =>
 const ShadowAccount = lazy(() =>
   import("@/pages/ShadowAccount").then((m) => ({ default: m.ShadowAccount })),
 );
+const Market = lazy(() =>
+  import("@/pages/Market").then((m) => ({ default: m.Market })),
+);
 
 function PageLoader() {
   return (
@@ -55,6 +58,7 @@ export const router = createBrowserRouter([
       { path: "/runs/:runId", element: wrap(RunDetail) },
       { path: "/compare", element: wrap(Compare) },
       { path: "/correlation", element: wrap(Correlation) },
+      { path: "/market", element: wrap(Market) },
       { path: "/portfolio", element: wrap(Portfolio) },
       { path: "/trades", element: wrap(TradeHistory) },
       { path: "/shadow", element: wrap(ShadowAccount) },
